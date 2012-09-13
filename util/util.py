@@ -12,7 +12,6 @@ import os
 from scipy.integrate import quad
 from scipy import interpolate
 
-
 #data_dir = os.path.join(os.path.dirname(heroes.__file__), "util", "data") 
 data_dir = '/Users/schriste/Dropbox/python/heroes/util/data/'
 
@@ -135,12 +134,75 @@ return, result(*)
     """
     
     # kt0 =( kt(0) > 0.1) ; protect against vectors for kt
-    result = (1.e8/9.26) * gaunt_factor(energy_kev, kt) * 1/(energy_kev * np.sqrt(kt)) * n.exp(- (energy_kev / kt))
+    #result = (1.e8/9.26) * float(acgaunt(12.3985/E, KT0/.08617)) *exp(-(E/KT0 < 50)) /E / KT0^.5
 
-def gaunt_factor(energy_kev, kt):
-    a = 0.5*energy_kev/kt
-    return np.exp(a)*kv(a)
+    result = (1.e8/9.26) * gaunt_factor(energy_kev, kt) * 1/(energy_kev * np.sqrt(kt)) * np.exp(- (energy_kev / kt))
+    return result
 
+def rgaunt_factor(energy_kev, kt, Z=1):
+    """Analytic fitting formula for the non-relativistivic gaunt factor
+    
+    Source
+    ======
+    Itoh et al. 2000, ApJSS, 128, 125
+    """
+
+    k = con.physical_constants.get('Boltzmann constant')[0]
+    electron_volt = con.physical_constants.get('electron volt')[0]
+    
+    # units 
+    temp_K_to_kev_conversion = k / electron_volt / 1000
+
+    data_gaunt = np.genfromtxt(data_dir + 'itoh.txt')
+    coefficients = data_gaunt[Z-1].reshape(11,11)
+
+    u = energy_kev / kt
+    temperature_K = kt / temp_K_to_kev_conversion
+
+    gaunt_factor = 0
+    U = (np.log10(u) + 1.5) / 2.5 
+    t = (np.log10(temperature_K) - 7.25) / 1.25 
+            
+    for j in range(11):
+        for i in range(11):
+            
+            gaunt_factor += coefficients[i,j] * (t ** i) * (U ** j)
+
+    return gaunt_factor
+
+def nrgaunt_factor(energy_kev, kt, Z=1):
+    """Analytic fitting formula for the non-relativistivic gaunt factor
+
+    Source
+    ======
+    Itoh et al. 2000, ApJSS, 128, 125
+    """
+    
+    k = con.physical_constants.get('Boltzmann constant')[0]
+    electron_volt = con.physical_constants.get('electron volt')[0]
+    
+    # units 
+    temp_K_to_kev_conversion = k / electron_volt / 1000
+
+    coefficients = np.genfromtxt(data_dir + 'itohnr.txt', delimiter = ",")
+
+    u = energy_kev / kt
+    
+    temperature_K = kt / temp_K_to_kev_conversion
+    print(temperature_K)
+    
+    U = (np.log10(u) + 1.5) / 2.5
+    g2 = Z ** 2 * 1.579e5 / temperature_K
+    G = (np.log10(g2) + 0.5) / 2.5
+
+    gaunt_factor = 0
+
+    for j in range(11):
+        for i in range(11):
+            gaunt_factor += coefficients[i,j] * (G ** i) * (U ** j)
+            
+    return gaunt_factor
+    
 def effective_area(energy_kev):
     """Returns the HEROES effective area in cm^2 at a particular energy given in keV."""
     
