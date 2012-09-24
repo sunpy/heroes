@@ -8,6 +8,9 @@ from scipy.special import kv
 import urllib2 as url
 from bs4 import BeautifulSoup
 import os
+import tempfile
+import shutil
+from sunpy.time import parse_time
 
 from scipy.integrate import quad
 from scipy import interpolate
@@ -15,7 +18,69 @@ from scipy import interpolate
 #data_dir = os.path.join(os.path.dirname(heroes.__file__), "util", "data") 
 data_dir = '/Users/schriste/Dropbox/python/heroes/util/data/'
 
+_msis_atmosphere_file = None
 
+class Fit_data:
+    """A class for data."""
+    
+    def __init__(self, x, y, xtitle, ytitle, name, xunits, yunits, log):
+        self.xrange = [x.min(), x.max()]
+        self.yrange = [y.min(), y.max()]
+    
+        self.x = x
+        self.y = y
+        self.xtitle = xtitle
+        self.ytitle = ytitle
+        self.log = log
+        self.name = name
+        self.xunits = xunits
+        self.yunits = yunits
+        
+    def func(self, x):
+        if self.log[0] == 1:
+            fit_x = np.log10(self.x)
+        else: fit_x = self.x
+        
+        if self.log[1] == 1:
+            fit_y = np.log10(self.y)
+            fill_value = -100
+        else: 
+            fit_y = self.y
+            fill_value = 0
+        
+        f = interpolate.interp1d(fit_x, fit_y, kind = 'quadratic', bounds_error=False, fill_value = fill_value)    
+        if self.log[0] == 1:
+            x_in = 10 ** x
+        else: x_in = x
+        
+        if self.log[1] == 1:
+            f1 = lambda y: 10 ** f(y)
+        
+        return f1(x_in)
+
+    def show(self):
+        ax = plt.subplot(111)
+    
+        if self.log is not None:
+            if self.log[0] == 1:
+                ax.set_xscale('log')
+            if self.log[1] == 1:
+                ax.set_yscale('log')
+    
+        ax.set_ylabel(self.ytitle + ' [' + self.yunits + ']')
+        ax.set_xlabel(self.xtitle + ' [' + self.xunits + ']')
+        ax.set_title(self.name)
+        
+        num_points = self.x.shape[0]
+
+        fit_x = np.linspace(self.xrange[0], self.xrange[1], num = num_points*10)
+        fit_y = self.func(fit_x)
+        ax.plot(fit_x, fit_y, "-", color = 'blue')
+        
+        ax.plot(self.x, self.y, "o", color = 'red')
+
+        plt.show()
+        
 # densities 
 # source; wolframalpha
 density = {"air stp": 0.001204, "si": 2.33, "be": 1.848, "water": 1, "cadmium telluride": 6.2, 
@@ -136,7 +201,7 @@ return, result(*)
     # kt0 =( kt(0) > 0.1) ; protect against vectors for kt
     #result = (1.e8/9.26) * float(acgaunt(12.3985/E, KT0/.08617)) *exp(-(E/KT0 < 50)) /E / KT0^.5
 
-    result = (1.e8/9.26) * gaunt_factor(energy_kev, kt) * 1/(energy_kev * np.sqrt(kt)) * np.exp(- (energy_kev / kt))
+    result = (1.e8/9.26) * gaunt_factor(energy_kev, kt) * 1 / (energy_kev * np.sqrt(kt)) * np.exp(- (energy_kev / kt))
     return result
 
 def rgaunt_factor(energy_kev, kt, Z=1):
@@ -274,55 +339,67 @@ def sensitivity(integration_time, de = 5, statistical_sig = 5):
     
     return  a/b
 
-def get_msis_atmosphere_density(latitude=55, longitude=45, height=100, start=0, stop=1000, step=10):
-    vars = [5,11] # 5 is height, 11 is density g/cm^3
-    addr = 'http://omniweb.gsfc.nasa.gov/cgi/vitmo/vitmo_model.cgi'
-    data = u'model=msis&year=2000&month=01&day=01&time_flag=0&hour=1.5&geo_flag=0.&latitude=55.&longitude=45.'
-    data = data + u'&height=100.&profile=1&start=0.&stop=1000.&step=50.&f10_7=&f10_7_3=&ap=&format=0&'
-    data = data + 'vars=0' + str(vars[0]) + '&vars=0' + str(vars[1])
-    a = url.Request(addr, data)
-    f = url.urlopen(a)
-
-    f = url.urlopen(a)
+def get_msis_atmosphere_density(latitude=55, longitude=45, reload=False, date = '2000/01/01 01:00:00'):
+    '''Downloads the MSIS atmospheric model from the web at a given longitude, latitude
+    and returns the density (g/cm^3) as a function of height (km). The data is saved
+    in a temporary file and further calls use this to save time'''
     
-    data = np.genfromtxt(f, skip_header = 18, skip_footer = 16)
+    global _msis_atmosphere_file
+    t = parse_time(date)
+    
+    vars = [5,11] # 5 is height, 11 is density g/cm^3
+
+    if (_msis_atmosphere_file == None) or (reload is True):
+        temp = tempfile.NamedTemporaryFile(delete=False)
+        _msis_atmosphere_file = temp.name
+    
+        addr = 'http://omniweb.gsfc.nasa.gov/cgi/vitmo/vitmo_model.cgi'
+        data = u'model=msis&year=' + str(t.year) + '&month=' + str(t.month).zfill(2)
+        data += '&day=' + str(t.day).zfill(2) + '&time_flag=0&hour=' 
+        data += str(t.hour).zfill(2) + '&geo_flag=0.&latitude'
+        data += str(latitude) + '&longitude=' + str(longitude)
+        data += u'&height=100.&profile=1&start=0.&stop=1000.&step=20.&f10_7=&f10_7_3=&ap=&format=0&'
+        data += 'vars=0' + str(vars[0]) + '&vars=0' + str(vars[1])
+        a = url.Request(addr, data)
+        req = url.urlopen(a)
+        with open(temp.name, 'wb') as fp:
+            shutil.copyfileobj(req, fp)
+
+    data = np.genfromtxt(_msis_atmosphere_file, skip_header = 18, skip_footer = 16, dtype='f8,f8', names=['x','y'])
 
     return data
 
-def atmosphere_density(height_km, date = '2012/09/01 00:00', latitude=55, longitude=45, data = None):
+def atmosphere_density_fitdata(date = '2000/01/01 01:00:00', latitude=55, longitude=45):
+
+    data = get_msis_atmosphere_density(date=date, latitude=latitude, longitude=longitude)
+    f = Fit_data(1e5 * data['x'], data['y'], 'Height', 'density', 'MSIS', 'cm', 'g cm$^{-3}$', log = [0,1])
+    
+    return f
+    
+def atmosphere_density(height_km, date = '2000/01/01 01:00:00', latitude=55, longitude=45):
     '''
-    Returns the atmospheric density (in g/cm^-3) at a specific height (given in km)
+    Returns the atmospheric density (in g/cm^-3) at a specific height (given in cm)
     
     Source
     ------
     http://omniweb.gsfc.nasa.gov/vitmo/msis_vitmo.html
     '''
+    fitdata = atmosphere_density_fitdata(date = date, latitude = latitude, longitude = longitude)
+    return fitdata.func(height_km)
     
-    # get the data from online
-    if data is None:
-        data = get_msis_atmosphere_density(date=date, latitude=latitude, longitude=longitude)
+def atmosphere_mass(height_km):
     
-    f = interpolate.interp1d(data[:,0], data[:,1])
-        
-    return f(height_km)
+    mass_flux = quad(atmosphere_density_fitdata().func, height_km * 1e5, 1e8)[0]
+    return mass_flux    
     
-def xray_transmission_in_atmosphere(height_km, view_angle=90, data = None):
+def xray_transmission_in_atmosphere(energy_kev, height_km, view_angle=90, data = None):
     """Find the total mass of atmosphere above a height given in km"""
     
-    # get the data from online
-    if data is None:
-        data = get_msis_atmosphere_density()
- 
-    data_height_cm = data[:,0]*100000
-    data_density_cgs = data[:,1]/np.sin(np.deg2rad(view_angle))
-    
-    co = interpolate.interp1d(height_cm, data[:,1])
-        
-    coefficients = mass_attenuation_coefficicent(energy_kev, material=material)
-    transmission = np.exp(-coefficients * density_cgs.get(material) * path_length_m * 100.0)
+    co = mass_attenuation_coefficicent(energy_kev, material='air stp')
+    mass_flux = atmosphere_mass(height_km)
+    return np.exp(-co * mass_flux  * np.sin(np.deg2rad(view_angle)) )
 
-    return quad(f, height_km, data[:,0].max())
-    
+
 def plot_foxsi_effarea():
 
     data = np.genfromtxt(data_dir + 'foxsi_effective_area.txt', skip_header = 1, delimiter = ',')
