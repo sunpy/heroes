@@ -229,3 +229,61 @@ def acgaunt(wave, te_6):
 	endif
 
 	return gaunt_ff + gaunt_2p + gaunt_fb
+
+
+def earth_atmosphere(height_m, DENSITY = density, TEMP = temp, PRESSURE = pressure, CGS=cgs, NUM=num, MSIS = msis
+
+	'''Written by Steven Christe'''
+;             height is expected to be in meters.
+; Keywords
+;             DENSITY - set density to return the density (default)
+;             TEMP - to return the temperature (Celsius)
+;             PRESSURE - to return the pressure (kPa)
+;             NUM - set if you want number density (m^-3)
+;             MSIS - set if you want realistic values above 70 km!!!!!
+
+;gas constant in units J/kg/K
+    boltzman_constant = con.k
+
+    IF NOT keyword_set(num) THEN R = 0.286 ELSE R = 1.38d-20
+    
+	# the troposphere (heigh_m < 11000)
+	if height_m < 11000:
+		temperature = 15.04 - .00649 * height_m
+        pressure = 101.29 * ((temperature + 273.1)/288.08) ** 5.256
+
+	# the lower stratosphere (11000 < height_m < 25000)
+    if height_m:
+	    temperature = -56.46
+        pressure = 22.65 * np.exp(1.73 - .000157 * height_m)
+    
+	# the upper stratosphere (height_m >25000)
+    if height_m:
+        temperature = -131.21 + .00299 * height_m
+        pressure = 2.488 * ((temperature + 273.1)/ 216.6) ** (-11.388)
+    
+    density = pressure / (R * (temperature + 273))
+    
+    IF keyword_set(cgs) THEN density = density*(1000.)/(100.0)^3
+
+    ;need more work here!
+    restore, '~/data/msis_atmosphere_model.dat'
+
+    h_km = result.height_km
+    density_cgs = interpol(result.density_cgs, h_km*1000.0, h)
+
+def atmospheric_absorption(height_km, look_angle = 90):
+	'''Provides the atmospheric absorption of xrays from a particular height in km'''
+	
+    h_m = findgen(500)*1000.0
+    density_cgs = earth_atmosphere(h_m,/msis)
+;    PLOT, density_cgs, h_m/1d3, xtit='Density [g/cm!U3!N]', ytit='Altitude [km]', /xlog, charsize = 2.0
+;    h_cm = h_m*100.0
+
+	masscoeff = result.masscoeff
+    h_cm = h_m *100.0	
+    index = where(h_m GE height_km*1000.0 )
+    total_mass = int_tabulated(h_cm[index], density_cgs[index], /double)
+    total_mass = total_mass/sin(view_angle*!PI/180.0)
+    plot_title = 'h = ' + num2str(height_km, length = 5) + ' km'
+ENDIF 

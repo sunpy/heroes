@@ -7,66 +7,125 @@ from scipy import constants as con
 from scipy.special import kv
 import urllib2 as url
 from bs4 import BeautifulSoup
-from StringIO import StringIO
+import os
+import tempfile
+import shutil
+from sunpy.time import parse_time
 
+from scipy.integrate import quad
 from scipy import interpolate
 
-data_dir = './data/'
+#data_dir = os.path.join(os.path.dirname(heroes.__file__), "util", "data") 
+data_dir = '/Users/schriste/Dropbox/python/heroes/util/data/'
 
+_msis_atmosphere_file = None
 
+class Fit_data:
+    """A class for data."""
+    
+    def __init__(self, x, y, xtitle, ytitle, name, xunits, yunits, log):
+        self.xrange = [x.min(), x.max()]
+        self.yrange = [y.min(), y.max()]
+    
+        self.x = x
+        self.y = y
+        self.xtitle = xtitle
+        self.ytitle = ytitle
+        self.log = log
+        self.name = name
+        self.xunits = xunits
+        self.yunits = yunits
+        
+    def func(self, x):
+        if self.log[0] == 1:
+            fit_x = np.log10(self.x)
+        else: fit_x = self.x
+        
+        if self.log[1] == 1:
+            fit_y = np.log10(self.y)
+            fill_value = -100
+        else: 
+            fit_y = self.y
+            fill_value = 0
+        
+        f = interpolate.interp1d(fit_x, fit_y, kind = 'quadratic', bounds_error=False, fill_value = fill_value)    
+        if self.log[0] == 1:
+            x_in = 10 ** x
+        else: x_in = x
+        
+        if self.log[1] == 1:
+            f1 = lambda y: 10 ** f(y)
+        
+        return f1(x_in)
+
+    def show(self):
+        ax = plt.subplot(111)
+    
+        if self.log is not None:
+            if self.log[0] == 1:
+                ax.set_xscale('log')
+            if self.log[1] == 1:
+                ax.set_yscale('log')
+    
+        ax.set_ylabel(self.ytitle + ' [' + self.yunits + ']')
+        ax.set_xlabel(self.xtitle + ' [' + self.xunits + ']')
+        ax.set_title(self.name)
+        
+        num_points = self.x.shape[0]
+
+        fit_x = np.linspace(self.xrange[0], self.xrange[1], num = num_points*10)
+        fit_y = self.func(fit_x)
+        ax.plot(fit_x, fit_y, "-", color = 'blue')
+        
+        ax.plot(self.x, self.y, "o", color = 'red')
+
+        plt.show()
+        
+# densities 
+# source; wolframalpha
+density = {"air stp": 0.001204, "si": 2.33, "be": 1.848, "water": 1, "cadmium telluride": 6.2, 
+"cesium iodide": 4.51, "gallium arsenide": 5.31, "mercuric iodide": 6.36, "lead glass": 6.22}
 
 '''The X-ray transmission data comes from NIST 
-	(http://www.nist.gov/pml/data/xraycoef/index.cfm)'''
+	(http://www.nist.gov/pml/data/xraycoef/index.cfm)'''    
 
-def xray_transmission_in_air(path_length_meters, energy_kev):
-	'''Provide the Xray transmission (0 to 1) in air given a path length in meters at 
-	a particular energy given in keV.
-	WARNING! This function is only good up to 30 keV or 30 meters. Base data does not
-	go above these values.'''
+def xray_transmission(path_length_m, energy_kev, material='air stp'):
+	"""Provide the X-ray transmission (0 to 1) in given a path length in meters at 
+	a particular energy given in keV through a material with a constant density."""
+		
+	coefficients = mass_attenuation_coefficicent(energy_kev, material=material)
+	transmission = np.exp(-coefficients * density_cgs.get(material) * path_length_m * 100.0)
 	
-	# the density of air at sea level
-	density_cgs = 1.2754 * (1000.0/1) * (1/100.0) ** 3.0
-	total_mass = density_cgs * path_length_meters * 100.0
-
-	air_coefficients = load_mass_attenuation_coefficients(material_name='air_dry_near_sea_level')
-
-	co = air_coefficients[1,:] * density_cgs * path_length_meters * 100.0
-	
-	data_energy_kev = air_coefficients[:,0]
-	data_mass_coefficient = np.exp(-co)
-	f = interpolate.interp1d(data_energy_kev, data_mass_coefficient)
-    
-	coeff = f(energy_kev)*total_mass
-	transmission = np.exp(-coeff)
-
 	return transmission
 
-def load_mass_attenuation_coefficients(material_name='air_dry_near_sea_level'):
-	'''Load the mass attenuation coefficients and mass energy-absorption coefficients
-	from the data files. The allowed material names are 
-	be
-	air_dry_near_sea_level
-	cadmium_telluride
-	cesium_iodide
-	gallium_arsenide
-	lead_glass
-	mercuric_iodide
-	water_liquid
-	silicon
-	'''
+def load_mass_attenuation_coefficients(material='air_dry_near_sea_level'):
+	'''Load the mass attenuation coefficients (cm2/g) and mass energy-absorption coefficients (cm2/g)
+	from the data files as a function of energy (MeV). The allowed materials are listed in density.'''
 
-	filename = '/Users/schriste/Dropbox/python/heroes/util/data/XrayMassCoef_' + material_name + '.txt'
+	filename = data_dir + 'XrayMassCoef_' + material.replace(' ', '_').capitalize() + '.txt'
 	data = np.genfromtxt(filename, comments = ';', missing_values = ' ', skip_header = 8)
 	
 	return data
-	
-def plot_mass_attenuation_coefficient(material_name='air_dry_near_sea_level'):
+
+def mass_attenuation_coefficicent(energy_kev, material):
+    """Returns the mass attenuation coefficient at an energy given in keV"""
+
+    data = load_mass_attenuation_coefficients(material)
+
+    # data is better behaved in log space
+    data_energy_kev = np.log10(data[:,0]*1000)
+    data_attenuation_coeff = np.log10(data[:,1])
+    f = interpolate.interp1d(data_energy_kev, data_attenuation_coeff)    
+
+    return 10 ** f(np.log10(energy_kev))
+
+def plot_mass_attenuation_coefficient(material='air_dry_near_sea_level'):
 	'''Plot the mass the mass attenuation coefficients and mass energy-absorption 
 	coefficients for a named material. See load_mass_attenuation_coefficients definition
 	for list of allowed materials.'''
 	
-	data = load_mass_attenuation_coefficients(material_name=material_name)
-	
+	data = load_mass_attenuation_coefficients(material=material)
+		
 	energy_kev = data[:,0]
 	mass_atten_coeff = data[:,1]
 	mass_energy_atten_coeff = data[:,2]
@@ -75,7 +134,7 @@ def plot_mass_attenuation_coefficient(material_name='air_dry_near_sea_level'):
 	ax.set_xscale('log')
 	ax.set_yscale('log')
 	ax.set_xlabel('Energy [keV]')
-	ax.set_title(material_name.replace('_', ' ').capitalize())
+	ax.set_title(material.replace('_', ' ').capitalize())
 	ax.set_ylabel(r'Mass Attenuation Coefficient [cm$^2$/g]')
 		
 	ax.plot(energy_kev, mass_atten_coeff)
@@ -84,30 +143,19 @@ def plot_mass_attenuation_coefficient(material_name='air_dry_near_sea_level'):
 	ax.legend((r'$\mu/\rho$', r'$\mu_{en}/\rho$'))
 
 	plt.show()
+	
+def xray_absorption(energy_kev, thickness_um, material='si'):
+	'''Calculate the xray absorption in a material with a thickess (given in microns).'''
+	
+	return 1-xray_transmission(energy_kev, thickness_um/1e6, material=material)
 
-def xray_transmission(energy_kev, thickness_um, material_name='si'):
-	'''Calculate the xray transmission through a material at a given energy'''
-	data = load_attenuation_length(material_name = material_name)
-	data_energy_kev = data[:,0]/1000.0
-	data_atten_length_um = data[:,1]
-	
-	func_atten_length_um = interpolate.interp1d(data_energy_kev, data_atten_length_um)
-	
-	transmission = np.exp( -thickness_um / func_atten_length_um(energy_kev) )
-	
-	return transmission
-	
-def xray_absorption(energy_kev, thickness_um, material_name='si'):
-	'''Calculate the xray absorption in a material'''
-	return 1-xray_transmission(energy_kev, thickness_um, material_name=material_name)
-
-def detector_efficiency(energy_kev, thickness_um, material_name='si'):
+def detector_efficiency(energy_kev, thickness_um, material='si'):
 	'''Calculate the detector quantum efficiency (in percent) at a given energy'''
 	
-	return xray_absorption(energy_kev, thickness_um, material_name=material_name)*100.0
+	return xray_absorption(energy_kev, thickness_um, material=material)*100.0
 
-def load_attenuation_length(material_name='si'):
-	filename = '/Users/schriste/Dropbox/python/heroes/util/data/' + material_name + '_xray_atten_length.txt'
+def load_attenuation_length(material='si'):
+	filename = data_dir + material + '_xray_atten_length.txt'
 	data = np.genfromtxt(filename, comments = ';', missing_values = ' ', skip_header = 3)
 	
 	return data
@@ -151,16 +199,123 @@ return, result(*)
     """
     
     # kt0 =( kt(0) > 0.1) ; protect against vectors for kt
-    result = (1.e8/9.26) * gaunt_factor(energy_kev, kt) * 1/(energy_kev * np.sqrt(kt)) *n.exp(- (energy_kev / kt))
+    #result = (1.e8/9.26) * float(acgaunt(12.3985/E, KT0/.08617)) *exp(-(E/KT0 < 50)) /E / KT0^.5
 
-def gaunt_factor(energy_kev, kt):
-    a = 0.5*energy_kev/kt
-    return np.exp(a)*kv(a)
+    result = (1.e8/9.26) * gaunt_factor(energy_kev, kt) * 1 / (energy_kev * np.sqrt(kt)) * np.exp(- (energy_kev / kt))
+    return result
 
+def rgaunt_factor(energy_kev, kt, Z=1):
+    """Analytic fitting formula for the non-relativistivic gaunt factor
+    
+    Source
+    ======
+    Itoh et al. 2000, ApJSS, 128, 125
+    """
 
+    k = con.physical_constants.get('Boltzmann constant')[0]
+    electron_volt = con.physical_constants.get('electron volt')[0]
+    
+    # units 
+    temp_K_to_kev_conversion = k / electron_volt / 1000
 
+    data_gaunt = np.genfromtxt(data_dir + 'itoh.txt')
+    coefficients = data_gaunt[Z-1].reshape(11,11)
+
+    u = energy_kev / kt
+    temperature_K = kt / temp_K_to_kev_conversion
+
+    gaunt_factor = 0
+    U = (np.log10(u) + 1.5) / 2.5 
+    t = (np.log10(temperature_K) - 7.25) / 1.25 
+            
+    for j in range(11):
+        for i in range(11):
+            
+            gaunt_factor += coefficients[i,j] * (t ** i) * (U ** j)
+
+    return gaunt_factor
+
+def nrgaunt_factor(energy_kev, kt, Z=1):
+    """Analytic fitting formula for the non-relativistivic gaunt factor
+
+    Source
+    ======
+    Itoh et al. 2000, ApJSS, 128, 125
+    """
+    
+    k = con.physical_constants.get('Boltzmann constant')[0]
+    electron_volt = con.physical_constants.get('electron volt')[0]
+    
+    # units 
+    temp_K_to_kev_conversion = k / electron_volt / 1000
+
+    coefficients = np.genfromtxt(data_dir + 'itohnr.txt', delimiter = ",")
+
+    u = energy_kev / kt
+    
+    temperature_K = kt / temp_K_to_kev_conversion
+    print(temperature_K)
+    
+    U = (np.log10(u) + 1.5) / 2.5
+    g2 = Z ** 2 * 1.579e5 / temperature_K
+    G = (np.log10(g2) + 0.5) / 2.5
+
+    gaunt_factor = 0
+
+    for j in range(11):
+        for i in range(11):
+            gaunt_factor += coefficients[i,j] * (G ** i) * (U ** j)
+            
+    return gaunt_factor
+    
 def effective_area(energy_kev):
     """Returns the HEROES effective area in cm^2 at a particular energy given in keV."""
+    
+    data_energy_kev = np.arange(20,80,10)
+    data_effective_area = np.array([80,75,60,40,15,5])
+    f = interpolate.interp1d(data_energy_kev, data_effective_area)
+
+    return f(energy_kev)
+
+def detector_background(energy_kev):
+    
+    data_energy_kev = np.arange(20,80,10)
+    data_det_background = np.array([2,2,2.5,3,3,3]) * 0.001
+    f = interpolate.interp1d(data_energy_kev, data_det_background)
+
+    return f(energy_kev)
+
+def atmo_transmission(energy_kev):
+    
+    data_energy_kev = np.arange(20,80,10)
+    data_atmo_transmission = np.array([0.26, 2.0, 3.2, 3.7, 4.2, 4.5]) * 0.1
+    f = interpolate.interp1d(data_energy_kev, data_atmo_transmission)
+
+    return f(energy_kev)
+
+def detector_efficiency(energy_kev):
+
+    data_energy_kev = np.arange(20,80,10)
+    data_detector_efficiency = np.array([9.8, 9.2, 9.9, 9.7, 8.9, 7.7]) * 0.1
+
+    f = interpolate.interp1d(data_energy_kev, data_detector_efficiency)
+
+    return f(energy_kev)
+
+def sensitivity(background_counts, flux_to_counts_conversion, statistical_significance=5):
+    """Calculates the sensitivity of an instrument using the following formula
+    
+        K = signal / sqrt(signal + background)
+        
+    where K is the significance (in sigma). This equation solves to 
+    
+        Sensitivity Flux limit = (K^2 + sqrt(K^4 - 4*background)) / 2 * flux_to_counts_conversion
+    
+    """
+    
+    result = 1/(2 * flux_to_counts_conversion) * statistical_significance ** 2 + np.sqrt( statistical_significance ** 4 - 4 * background_counts )
+    
+    return result
     
 
 def sensitivity(integration_time, de = 5, statistical_sig = 5):
@@ -168,36 +323,102 @@ def sensitivity(integration_time, de = 5, statistical_sig = 5):
     de is the width of the energy interval in keV"""
     
     energy_kev = np.arange(20,80,10)
-    de = energy_kev
-    det_background = np.array([2,2,2.5,3,3,3]) * 0.001
-    effective_area = np.array([80,75,60,40,15,5])
-    detector_efficiency = np.array([9.8, 9.2, 9.9, 9.7, 8.9, 7.7]) * 0.1
-    atmo_transmission = np.array([0.26, 2.0, 3.2, 3.7, 4.2, 4.5]) * 0.1
+    det_eff = detector_background(energy_kev)
+    det_background = detector_background(energy_kev)
+    eff_area = effective_area(energy_kev)
+    
+    det_efficiency = detector_efficiency(energy_kev)
+    transmission = atmo_transmission(energy_kev)
     background_area = 8 * 0.04
     fraction_flux = 0.8
     
     a = statistical_sig ** 2 + np.sqrt(statistical_sig ** 4 + 4*statistical_sig ** 2 *
         det_background * de * background_area * integration_time)
         
-    b = 2 * effective_area * de * integration_time * atmo_transmission * detector_efficiency * fraction_flux
+    b = 2 * eff_area * de * integration_time * transmission * det_eff * fraction_flux
     
     return  a/b
 
-def msis_atmosphere_density(var, date = '2012/09/01 00:00', latitude=55, longitude=45, height=100, start=0, stop=1000, step=10):
+def get_msis_atmosphere_density(latitude=55, longitude=45, reload=False, date = '2000/01/01 01:00:00'):
+    '''Downloads the MSIS atmospheric model from the web at a given longitude, latitude
+    and returns the density (g/cm^3) as a function of height (km). The data is saved
+    in a temporary file and further calls use this to save time'''
+    
+    global _msis_atmosphere_file
+    t = parse_time(date)
     
     vars = [5,11] # 5 is height, 11 is density g/cm^3
-    addr = 'http://omniweb.gsfc.nasa.gov/cgi/vitmo/vitmo_model.cgi'
-    data = u'model=msis&year=2000&month=01&day=01&time_flag=0&hour=1.5&geo_flag=0.&latitude=55.&longitude=45.'
-    data = data + u'&height=100.&profile=1&start=0.&stop=1000.&step=50.&f10_7=&f10_7_3=&ap=&format=0&'
-    data = data + 'vars=0' + str(vars[0]) + '&vars=0' + str(vars[1])
-    a = url.Request(addr, data)
-    f = url.urlopen(a)
 
-    print(f.read())
-    f = url.urlopen(a)
+    if (_msis_atmosphere_file == None) or (reload is True):
+        temp = tempfile.NamedTemporaryFile(delete=False)
+        _msis_atmosphere_file = temp.name
     
-    data = np.genfromtxt(f, skip_header = 18, skip_footer = 16)
+        addr = 'http://omniweb.gsfc.nasa.gov/cgi/vitmo/vitmo_model.cgi'
+        data = u'model=msis&year=' + str(t.year) + '&month=' + str(t.month).zfill(2)
+        data += '&day=' + str(t.day).zfill(2) + '&time_flag=0&hour=' 
+        data += str(t.hour).zfill(2) + '&geo_flag=0.&latitude'
+        data += str(latitude) + '&longitude=' + str(longitude)
+        data += u'&height=100.&profile=1&start=0.&stop=1000.&step=20.&f10_7=&f10_7_3=&ap=&format=0&'
+        data += 'vars=0' + str(vars[0]) + '&vars=0' + str(vars[1])
+        a = url.Request(addr, data)
+        req = url.urlopen(a)
+        with open(temp.name, 'wb') as fp:
+            shutil.copyfileobj(req, fp)
+
+    data = np.genfromtxt(_msis_atmosphere_file, skip_header = 18, skip_footer = 16, dtype='f8,f8', names=['x','y'])
+
+    return data
+
+def atmosphere_density_fitdata(date = '2000/01/01 01:00:00', latitude=55, longitude=45):
+
+    data = get_msis_atmosphere_density(date=date, latitude=latitude, longitude=longitude)
+    f = Fit_data(1e5 * data['x'], data['y'], 'Height', 'density', 'MSIS', 'cm', 'g cm$^{-3}$', log = [0,1])
     
-    f = interpolate.interp1d(data[:,0], data[:,1])
-        
     return f
+    
+def atmosphere_density(height_km, date = '2000/01/01 01:00:00', latitude=55, longitude=45):
+    '''
+    Returns the atmospheric density (in g/cm^-3) at a specific height (given in cm)
+    
+    Source
+    ------
+    http://omniweb.gsfc.nasa.gov/vitmo/msis_vitmo.html
+    '''
+    fitdata = atmosphere_density_fitdata(date = date, latitude = latitude, longitude = longitude)
+    return fitdata.func(height_km)
+    
+def atmosphere_mass(height_km):
+    
+    mass_flux = quad(atmosphere_density_fitdata().func, height_km * 1e5, 1e8)[0]
+    return mass_flux    
+    
+def xray_transmission_in_atmosphere(energy_kev, height_km, view_angle=90, data = None):
+    """Find the total mass of atmosphere above a height given in km"""
+    
+    co = mass_attenuation_coefficicent(energy_kev, material='air stp')
+    mass_flux = atmosphere_mass(height_km)
+    return np.exp(-co * mass_flux  * np.sin(np.deg2rad(view_angle)) )
+
+
+def plot_foxsi_effarea():
+
+    data = np.genfromtxt(data_dir + 'foxsi_effective_area.txt', skip_header = 1, delimiter = ',')
+    
+    energy_kev = data[:,0]
+    foxsi1_cm2 = data[:,1]
+    foxsi2_cm2 = data[:,2]
+        
+    ax = plt.subplot(111)
+    #ax.set_xscale('log')
+    #ax.set_yscale('log')
+    ax.set_xlabel('Energy [keV]')
+    #ax.set_title(material.replace('_', ' ').capitalize())
+    ax.set_ylabel(r'Effective Area [cm$^2$]')
+		
+    ax.plot(energy_kev, foxsi1_cm2, color = 'blue')
+    ax.plot(energy_kev, foxsi2_cm2, color = 'red')
+
+    ax.legend((r'FOXSI-1', r'FOXSI-2'))
+
+    plt.show()
+	
