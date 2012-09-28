@@ -48,13 +48,15 @@ class Fit_data:
             fit_y = self.y
             fill_value = 0
         
-        f = interpolate.interp1d(fit_x, fit_y, kind = 'quadratic', bounds_error=False, fill_value = fill_value)    
+        f = interpolate.interp1d(fit_x, fit_y, kind = 3, bounds_error=False, fill_value = fill_value)    
+        x_in = x
         if self.log[0] == 1:
-            x_in = 10 ** x
-        else: x_in = x
+            x_in = 10 ** x_in
         
         if self.log[1] == 1:
             f1 = lambda y: 10 ** f(y)
+        else:
+            f1 = f
         
         return f1(x_in)
 
@@ -162,7 +164,8 @@ def load_attenuation_length(material='si'):
 
 def xyplot(x, y, ytitle = None, xtitle = None, title = None, log = None):
 	
-	ax = plt.subplot(111)
+	fig = plt.figure()
+	ax = fig.add_subplot(111)
 
 	if log is not None:
 		if log[0] == 1:
@@ -178,8 +181,15 @@ def xyplot(x, y, ytitle = None, xtitle = None, title = None, log = None):
 		ax.set_title(title)
 		
 	ax.plot(x, y)
-	plt.show()
-	
+	# plt.show()
+	return fig
+
+def oplot(x, y, plt):
+
+    ax = plt.gca()
+    ax.plot(x, y)
+    plt.show()
+    
     
 def thermal_bremsstrahlung_thin(energy_kev, kt):
     """This function calculates the optically thin continuum thermal bremsstrahlung
@@ -276,6 +286,19 @@ def effective_area(energy_kev):
     f = interpolate.interp1d(data_energy_kev, data_effective_area)
 
     return f(energy_kev)
+
+def effective_area2_fitdata():
+
+    number_of_modules = 8
+    data = np.genfromtxt('/Users/schriste/Dropbox/python/heroes/util/data/heroes_effective_area_0am5am.txt', comments=';', names=['x','y1','y2'])
+    result = Fit_data(data['x'], number_of_modules * data['y1'], 'Energy', 'Effective Area', 'HEROES', 'keV', 'cm$^{2}$', log = [0,0])
+    
+    return result
+    
+def effective_area2(energy_kev):
+
+    fit_data = effective_area2_fitdata()
+    return fit_data.func(energy_kev)
 
 def detector_background(energy_kev):
     
@@ -388,6 +411,7 @@ def atmosphere_density(height_km, date = '2000/01/01 01:00:00', latitude=55, lon
     return fitdata.func(height_km)
     
 def atmosphere_mass(height_km):
+    '''Returns the amount of mass in a 1 sq cm column of air above a height given in km'''
     
     mass_flux = quad(atmosphere_density_fitdata().func, height_km * 1e5, 1e8)[0]
     return mass_flux    
@@ -399,8 +423,14 @@ def xray_transmission_in_atmosphere(energy_kev, height_km, view_angle=90, data =
     mass_flux = atmosphere_mass(height_km)
     return np.exp(-co * mass_flux  * np.sin(np.deg2rad(view_angle)) )
 
+def foxsi_effective_area_fitdata():
 
-def plot_foxsi_effarea():
+    data = np.genfromtxt(data_dir + 'foxsi_effective_area.txt', skip_header = 1, delimiter = ',', dtype='f8,f8,f8', names=['x','y1','y2'])
+    f = Fit_data(data['x'], data['y1'], 'Energy', 'Effective Area', 'FOXSI', 'keV', 'cm$^{2}$', log = [0,0])
+    
+    return f
+
+def plot_foxsi_effarea_compare():
 
     data = np.genfromtxt(data_dir + 'foxsi_effective_area.txt', skip_header = 1, delimiter = ',')
     
