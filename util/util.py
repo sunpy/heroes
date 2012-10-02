@@ -411,9 +411,10 @@ def heroes_effective_area_fitdata():
     
     #Total effective area is 2 13-shell modules and 6 14-shell modules
     area = 2*data13[:,1:]+6*data14[:,1:]
+
+    #y, x = np.meshgrid(theta, energy)
+    #f2d = interpolate.interp2d(x, y, area)
+    f2d = interpolate.RectBivariateSpline(energy, theta, area)
     
-    #Currently only returns the effective area at 0 mas    
-    f = Fit_data(energy, area[:,0], 'Energy', 'Effective Area', 'HEROES', 'keV', 'cm$^{2}$', log = [0,0])
-    
-    return f
+    return f2d
     
