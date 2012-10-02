@@ -1,12 +1,16 @@
+from __future__ import absolute_import
+
+#__all__ = []
+
 import numpy as np
 import matplotlib.pyplot as plt
-import sys
-import platform
-import datetime
+#import sys
+#import platform
+#import datetime
 from scipy import constants as con
-from scipy.special import kv
+#from scipy.special import kv
 import urllib2 as url
-from bs4 import BeautifulSoup
+#from bs4 import BeautifulSoup
 import os
 import tempfile
 import shutil
@@ -15,73 +19,18 @@ from sunpy.time import parse_time
 from scipy.integrate import quad
 from scipy import interpolate
 
-#data_dir = os.path.join(os.path.dirname(heroes.__file__), "util", "data") 
-data_dir = '/Users/schriste/Dropbox/python/heroes/util/data/'
+try:
+    from .. fit_data import Fit_data
+except ValueError:
+    print("Do not import util directly.  Import heroes instead.")
+    print("(This hassle is due to the relative location of fit_data.py)")
+
+try:
+    data_dir = os.path.join(os.path.dirname(__file__),"data","")
+except AttributeError:
+    data_dir = '/Users/schriste/Dropbox/python/heroes/util/data/'
 
 _msis_atmosphere_file = None
-
-class Fit_data:
-    """A class for data."""
-    
-    def __init__(self, x, y, xtitle, ytitle, name, xunits, yunits, log):
-        self.xrange = [x.min(), x.max()]
-        self.yrange = [y.min(), y.max()]
-    
-        self.x = x
-        self.y = y
-        self.xtitle = xtitle
-        self.ytitle = ytitle
-        self.log = log
-        self.name = name
-        self.xunits = xunits
-        self.yunits = yunits
-        
-    def func(self, x):
-        if self.log[0] == 1:
-            fit_x = np.log10(self.x)
-        else: fit_x = self.x
-        
-        if self.log[1] == 1:
-            fit_y = np.log10(self.y)
-            fill_value = -100
-        else: 
-            fit_y = self.y
-            fill_value = 0
-        
-        f = interpolate.interp1d(fit_x, fit_y, kind = 3, bounds_error=False, fill_value = fill_value)    
-        x_in = x
-        if self.log[0] == 1:
-            x_in = 10 ** x_in
-        
-        if self.log[1] == 1:
-            f1 = lambda y: 10 ** f(y)
-        else:
-            f1 = f
-        
-        return f1(x_in)
-
-    def show(self):
-        ax = plt.subplot(111)
-    
-        if self.log is not None:
-            if self.log[0] == 1:
-                ax.set_xscale('log')
-            if self.log[1] == 1:
-                ax.set_yscale('log')
-    
-        ax.set_ylabel(self.ytitle + ' [' + self.yunits + ']')
-        ax.set_xlabel(self.xtitle + ' [' + self.xunits + ']')
-        ax.set_title(self.name)
-        
-        num_points = self.x.shape[0]
-
-        fit_x = np.linspace(self.xrange[0], self.xrange[1], num = num_points*10)
-        fit_y = self.func(fit_x)
-        ax.plot(fit_x, fit_y, "-", color = 'blue')
-        
-        ax.plot(self.x, self.y, "o", color = 'red')
-
-        plt.show()
         
 # densities 
 # source; wolframalpha
@@ -290,15 +239,15 @@ def effective_area(energy_kev):
 def effective_area2_fitdata():
 
     number_of_modules = 8
-    data = np.genfromtxt('/Users/schriste/Dropbox/python/heroes/util/data/heroes_effective_area_0am5am.txt', comments=';', names=['x','y1','y2'])
+    data = np.genfromtxt(data_dir+'heroes_effective_area_0am5am.txt', comments=';', names=['x','y1','y2'])
     result = Fit_data(data['x'], number_of_modules * data['y1'], 'Energy', 'Effective Area', 'HEROES', 'keV', 'cm$^{2}$', log = [0,0])
     
     return result
     
 def effective_area2(energy_kev):
 
-    fit_data = effective_area2_fitdata()
-    return fit_data.func(energy_kev)
+    fitdata = effective_area2_fitdata()
+    return fitdata.func(energy_kev)
 
 def detector_background(energy_kev):
     
@@ -452,3 +401,19 @@ def plot_foxsi_effarea_compare():
 
     plt.show()
 	
+def heroes_effective_area_fitdata():
+    
+    data13 = np.genfromtxt(data_dir + 'aeff_13shells_sky.dat', skip_header = 2)
+    data14 = np.genfromtxt(data_dir + 'aeff_14shells_sky.dat', skip_header = 2)
+    
+    energy = data13[:,0] # keV, axis assumed to be the same in the two files
+    theta = np.arange(0,13) # mas
+    
+    #Total effective area is 2 13-shell modules and 6 14-shell modules
+    area = 2*data13[:,1:]+6*data14[:,1:]
+    
+    #Currently only returns the effective area at 0 mas    
+    f = Fit_data(energy, area[:,0], 'Energy', 'Effective Area', 'HEROES', 'keV', 'cm$^{2}$', log = [0,0])
+    
+    return f
+    
