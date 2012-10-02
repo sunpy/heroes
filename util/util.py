@@ -17,6 +17,7 @@ import shutil
 from sunpy.time import parse_time
 
 from scipy.integrate import quad
+from scipy.integrate import dblquad
 from scipy import interpolate
 
 try:
@@ -26,7 +27,7 @@ except ValueError:
     print("(This hassle is due to the relative location of fit_data.py)")
 
 try:
-    data_dir = os.path.join(os.path.dirname(__file__),"data","")
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),"data","")
 except AttributeError:
     data_dir = '/Users/schriste/Dropbox/python/heroes/util/data/'
 
@@ -401,13 +402,14 @@ def plot_foxsi_effarea_compare():
 
     plt.show()
 	
-def heroes_effective_area_fitdata():
+def heroes_effective_area_fit():
     
     data13 = np.genfromtxt(data_dir + 'aeff_13shells_sky.dat', skip_header = 2)
     data14 = np.genfromtxt(data_dir + 'aeff_14shells_sky.dat', skip_header = 2)
     
     energy = data13[:,0] # keV, axis assumed to be the same in the two files
-    theta = np.arange(0,13) # mas
+    #energy = np.arange(17.50,80.25,0.25)
+    theta = np.arange(0,13) # arcmin
     
     #Total effective area is 2 13-shell modules and 6 14-shell modules
     area = 2*data13[:,1:]+6*data14[:,1:]
@@ -417,4 +419,38 @@ def heroes_effective_area_fitdata():
     f2d = interpolate.RectBivariateSpline(energy, theta, area)
     
     return f2d
+
+def heroes_effective_area_tophat(energy_range=(20,30), radius=9.5):
+    """
+    Calculates the average effective area for a tophat exposure
+    
+    energy_range is in keV
+    radius is in arcmin
+    """   
+    f2d = heroes_effective_area_fit()
+    area = dblquad(lambda e,r: f2d(e,r)*2*np.pi*r,
+                   0, radius,
+                   lambda e:energy_range[0], lambda e: energy_range[1])[0]
+    norm_area = np.pi*radius**2
+    area /= norm_area*(energy_range[1]-energy_range[0])
+    return area
+
+def heroes_effective_area_gaussian(energy_range=(20,30), fwhm=0.25, radius=9.5):
+    """
+    Calculates the average effective area for an on-axis Gaussian exposure
+    
+    energy_range is in keV
+    fwhm is in arcmin
+    radius is in arcmin (and should stay at the default of 9.5)
+    """
+    f2d = heroes_effective_area_fit()
+    sigma = fwhm/2.355
+    area = dblquad(lambda e,r: f2d(e,r)*r*np.exp(-(r/sigma)**2/2)/sigma**2,
+                   0, radius,
+                   lambda e:energy_range[0], lambda e: energy_range[1])[0]
+    norm_area_energy = dblquad(lambda e,r: r*np.exp(-(r/sigma)**2/2)/sigma**2,
+                   0, radius,
+                   lambda e:energy_range[0], lambda e: energy_range[1])[0]
+    area /= norm_area_energy
+    return area
     
