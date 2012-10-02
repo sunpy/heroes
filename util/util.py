@@ -425,7 +425,7 @@ def heroes_effective_area_tophat(energy_range=(20,30), radius=9.5):
     Calculates the average effective area for a tophat exposure
     
     energy_range is in keV
-    radius is in arcmin
+    radius of tophat is in arcmin
     """   
     f2d = heroes_effective_area_fit()
     area = dblquad(lambda e,r: f2d(e,r)*2*np.pi*r,
@@ -435,22 +435,20 @@ def heroes_effective_area_tophat(energy_range=(20,30), radius=9.5):
     area /= norm_area*(energy_range[1]-energy_range[0])
     return area
 
-def heroes_effective_area_gaussian(energy_range=(20,30), fwhm=0.25, radius=9.5):
+def heroes_effective_area_gaussian(energy_range=(20,30), fwhm=3, radius=9.5):
     """
     Calculates the average effective area for an on-axis Gaussian exposure
     
     energy_range is in keV
-    fwhm is in arcmin
-    radius is in arcmin (and should stay at the default of 9.5)
+    fwhm of source is in arcmin
+    radius of integration area is in arcmin
     """
     f2d = heroes_effective_area_fit()
     sigma = fwhm/2.355
     area = dblquad(lambda e,r: f2d(e,r)*r*np.exp(-(r/sigma)**2/2)/sigma**2,
                    0, radius,
                    lambda e:energy_range[0], lambda e: energy_range[1])[0]
-    norm_area_energy = dblquad(lambda e,r: r*np.exp(-(r/sigma)**2/2)/sigma**2,
-                   0, radius,
-                   lambda e:energy_range[0], lambda e: energy_range[1])[0]
-    area /= norm_area_energy
+    norm_area = 1.
+    area /= norm_area*(energy_range[1]-energy_range[0])
     return area
     
