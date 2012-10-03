@@ -9,9 +9,8 @@ from __future__ import absolute_import
 
 __version__ = 0.1
 
-launch_date = "September, 2012"
+launch_date = "September 2013"
 energy_range = [20,80]
 
-import heroes.util
-import heroes.fit_data
-
+from . import util
+from . fit_data import *
